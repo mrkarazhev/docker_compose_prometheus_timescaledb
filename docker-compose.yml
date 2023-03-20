@@ -1,0 +1,106 @@
+version: '3.6'
+
+networks:
+  observe:
+    name: observe
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+    - /prometheus/prometheus-data/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    - /prometheus/prometheus-data/data:/prometheus/data
+    - /prometheus/prometheus-data/alert-rules:/etc/prometheus/alert-rules
+    ports:
+    - 9090:9090
+    restart: always
+    networks:
+    - observe
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    container_name: grafana
+    depends_on:
+    - prometheus
+    ports:
+    - 3000:3000
+    volumes:
+    - /prometheus/grafana/data:/var/lib/grafana
+    networks:
+    - observe
+
+  alertmanager:
+    image: prom/alertmanager
+    container_name: alertmanager
+    ports:
+    - 9093:9093
+    volumes:
+    - /prometheus/alertmanager/config.yaml:/etc/alertmanager/config.yml
+    - /prometheus/alertmanager/data:/alertmanager/data
+    command:
+    - '--config.file=/etc/alertmanager/config.yml'
+    - '--storage.path=/alertmanager/data'
+    restart: always
+    networks:
+    - observe
+
+  alertmanager-bot:
+    image: metalmatze/alertmanager-bot:0.4.3
+    container_name: alertmanager-bot
+    command:
+    - --alertmanager.url=http://alertmanager:9093
+    - --log.level=info
+    - --store=bolt
+    - --bolt.path=/data/bot.db
+    environment:
+      TELEGRAM_ADMIN: {{ your your id chat tlgr }}
+      TELEGRAM_TOKEN: {{ your token bot tlgr }}
+    networks:
+    - observe
+    ports:
+    - 8080:8080
+    restart: always
+    volumes:
+    - ./telegram-bot/data:/data
+
+
+  timescaledb:
+    image: timescale/timescaledb-ha:pg14-latest
+    container_name: timescaledb
+    ports:
+    - 5432:5432
+    networks:
+    - observe
+    user: postgres
+    restart: always
+    environment:
+    - POSTGRES_HOST_AUTH_METHOD=trust
+    - POSTGRES_USER=postgres
+    - POSTGRES_PASSWORD=1q2w3e4r
+    - TSTUNE_PROFILE=promscale
+    - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+    - ./data:/var/lib/postgresql/data
+
+
+  promscale:
+    image: timescale/promscale:latest
+    container_name: promscale
+    depends_on:
+    - timescaledb
+    ports:
+    - 9201:9201
+    networks:
+    - observe
+    restart: always
+    command:
+    - '-db.user=postgres'
+    - '-db.password=1q2w3e4r'
+    - '-db.port=5432'
+    - '-db.name=postgres'
+    - '-db.host=timescaledb'
+    - '-db.ssl-mode=disable'
